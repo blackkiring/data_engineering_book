@@ -163,7 +163,7 @@ make_sft:
 
 *图41-2：MedImage-ToolVQA 数据构建概念流程。流程的重点不是脚本顺序，而是证据链和行为链如何在各阶段被保留下来。*
 
-在实现组织上，MedImage-ToolVQA 可以保留面向不同深度学习框架的独立实现入口。MindSpore 对应实现可使用 [MedImage-ToolVQA-Mindspore](https://github.com/blackkiring/MedImage-ToolVQA-Mindspore) 作为仓库目录；该目录目前为空目录占位，用于后续放置 MindSpore 版本的数据处理、训练封装、推理评测和说明文件。这样的占位不改变数据构建流程本身，但能让读者区分数据范式、框架实现和后续工程适配之间的边界。
+在实现组织上，MedImage-ToolVQA 可以保留面向不同深度学习框架的独立实现入口。 [MedImage-ToolVQA-Mindspore](https://github.com/blackkiring/MedImage-ToolVQA-Mindspore) 作为我们项目实现的仓库目录；该仓库放置了 MindSpore 版本的数据处理、训练封装、推理评测和说明文件。
 
 第一阶段是区域样本整理。来自医学图像解析工具的区域级结果需要被合并、去重和规范化。对于同一张医学图像，可能存在多个候选区域；同一个区域也可能在不同中间结果中重复出现。数据工程需要按区域标识进行去重，而非简单按图像去重，否则会误删同图中的多个病灶或结构。
 
