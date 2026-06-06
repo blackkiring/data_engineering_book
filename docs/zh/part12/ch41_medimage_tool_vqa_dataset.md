@@ -282,11 +282,13 @@ Assistant:
 
 在 SFT 阶段，数据最重要的是清晰和稳定。模型需要看到足够多格式正确的工具调用，理解 `<tool_call>` 内部应是可以解析的 JSON，理解工具返回后会出现新的图像观察，理解最终答案应写在固定位置。SFT 数据若格式混乱，后续 RL 环境就很难解析模型动作；若观察图插入位置不稳定，模型也难以学会”工具返回后继续推理”的节奏。
 
-在医学图像场景中，SFT 多轮记录还应显式保存一个影像诊断相关 schema。这里的“诊断”不是要求模型给出临床结论，而是把训练题目中的医学影像任务、候选标签、证据区域和安全边界结构化。图41-5给出了一组本地脱敏胸片样例：同一条记录不仅保存原始图像，还保存 bbox 坐标、框选可视化图和由工具返回的局部观察图。
+在医学图像场景中，SFT 多轮记录还应显式保存一个影像诊断相关 schema。这里的“诊断”不是要求模型给出临床结论，而是把训练题目中的医学影像任务、候选标签、证据区域和安全边界结构化。图41-5给出了一组来自 VQA-RAD 测试集的胸片样例：同一条记录不仅保存原始图像，还保存 bbox 坐标、框选可视化图和由工具返回的局部观察图。
 
 ![图41-5：SFT schema 中的真实图像与 bbox 证据](../../images/part12/ch41_05_sft_schema_real_bbox_example.png)
 
 *图41-5：SFT schema 中的真实图像与 bbox 证据。bbox 是训练记录中的结构化字段，同时也应能被还原为可复查的可视化证据。*
+
+图像来源：VQA-RAD test split，Hugging Face 数据集 [flaviagiammarino/vqa-rad](https://huggingface.co/datasets/flaviagiammarino/vqa-rad)，许可证为 [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/)；本图为工具调用示例中的重采样派生图，用于说明 schema 中原图、bbox overlay 与局部 crop 的对应关系。
 
 下面以这张胸部 X 线样例为基础，给出一条多轮 SFT 记录的写法。
 
@@ -300,6 +302,11 @@ Assistant:
     "view_or_series": "frontal chest radiograph",
     "image_role": "original_image",
     "figure_ref": "ch41_05_sft_schema_real_chest_xray.png",
+    "source_dataset": "VQA-RAD",
+    "source_split": "test",
+    "source_url": "https://huggingface.co/datasets/flaviagiammarino/vqa-rad",
+    "license": "CC0-1.0",
+    "derivation": "resized tool-observation example",
     "deidentification": "metadata_removed"
   },
   "diagnosis_schema": {
