@@ -1,5 +1,13 @@
 # 第48章：多模态生成模型数据工程：T2I 与 T2V 数据流水线
 
+## 摘要
+
+本章围绕“多模态生成模型数据工程：T2I 与 T2V 数据流水线”展开，聚焦大模型数据工程中的关键设计问题。章节从场景约束、数据对象、流水线设计、质量评估和工程治理等维度展开，说明如何把零散的数据处理动作收敛为可复盘、可验证、可交付的系统方法，并为后续章节和项目实战建立统一分析框架。
+
+## 关键词
+
+多模态生成模型数据工程；数据配方；开源大模型；训练数据；阶段化调度
+
 ## 篇前导读：同样的模型，为什么有的更“听话”
 
 在图像生成和视频生成里，一个经常被低估的问题是：模型到底在跟谁学 prompt？
@@ -379,6 +387,7 @@ T2I 与 T2V 的数据工程，已经从早期的“采集—清洗”升级为�
 本章也是第十一篇的收尾。前面几章讨论了多模态数据的采集、组织、理解与评估，本章把视角落到生成模型的数据流水线上。生成式 AI 的数据工程并不只是“准备更多素材”，它正在变成一种更精细的数据编排能力：把世界写成模型能学习的语言，把风险留在训练集之外，把质量和风格变成可控制的训练变量。
 
 
+
 ## 参考文献
 
 Betker J, Goh G, Jing L, Brooks T, Wang J, Li L, Ouyang L, Zhuang J, Lee J, Guo Y, others (2023) Improving Image Generation with Better Captions (DALL·E 3). OpenAI Technical Report.
@@ -404,4 +413,3 @@ Wan Team (2025) Wan: Open and Advanced Large-Scale Video Generative Models. arXi
 Wang W, Lv Q, Yu W, Hong W, Qi J, Wang Y, Ji J, Yang Z, Zhao L, Song X, others (2023) CogVLM: Visual Expert for Pretrained Language Models. In: Advances in Neural Information Processing Systems 36.
 
 Wu X, Sun K, Zhu F, Zhao R, Li H (2023) Human Preference Score v2: A Solid Benchmark for Evaluating Human Preferences of Text-to-Image Synthesis (HPSv2). arXiv preprint arXiv:2306.09341.
-
