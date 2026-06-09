@@ -4,6 +4,7 @@
 
 本章以“MedImage-ToolVQA 医学图像工具调用数据工程”为专项数据集案例，分析任务定义、样本结构、标注流程、质量控制和评测协议。章节强调该数据集如何验证前文的数据工程方法，并说明其在模型训练、基准评测和产业落地中的适用边界、复现条件与风险控制要求。
 
+本章配套实现仓库为 **MedImage-ToolVQA-Mindspore**，完整地址是 <https://github.com/blackkiring/MedImage-ToolVQA-Mindspore>。该仓库用于承接本章的数据构建、MindRecord 封装、SFT 微调、推理服务和评测脚本；后文的工程示例也以 MindSpore 体系为默认实现口径。
 
 在多模态数据工程中，医学图像问答通常被归入视觉问答（Visual Question Answering, VQA）的一种特殊形态；VQA 任务本身可以追溯到自然图像上的开放式问答设定 (Antol et al. 2015)。这一归类本身没有错，却容易遮蔽一个关键事实：医学图像中的“看见”，并不等同于自然图像中的“识别”。一张猫狗图片里，主体轮廓清晰、语义边界分明，模型只要捕捉到对象、属性和场景，就能回答相当一部分问题。医学图像则不同。胸片上的轻微磨玻璃影、CT 中的微小低密度灶、病理切片上的局部细胞排列、超声图像里的弱边界回声，往往只占据画面中很小一部分，而它们的意义必须放回解剖位置、影像模态、扫描条件和临床问题中才能理解。
 
@@ -13,7 +14,7 @@ MedImage-ToolVQA 正是在这一背景下出现的数据工程案例。它关注
 
 本章将围绕这一数据范式展开。我们先说明医学图像 VQA 与普通 VQA 的差异，再讨论为什么工具轨迹能够成为有价值的监督信号；随后解释 MedImage-ToolVQA 的样本结构、构建流程、工具体系和多轮轨迹；最后讨论质量控制、隐私合规和医学安全边界。需要强调的是，本章讨论的是数据工程与模型训练监督，不涉及临床诊断建议，也不将模型输出视作医学结论。
 
-![图41-1：医学图像 Agent 局部取证闭环](../../images/part12/ch41_01_medimage_tool_vqa_evidence_loop.png)
+![图41-1：医学图像 Agent 局部取证闭环](../../images/part12/ch41_01_medimage_tool_vqa_evidence_loop.svg)
 
 *图41-1：医学图像 Agent 局部取证闭环。医学图像工具调用数据的关键在于把“再看哪里、如何看、看完以后怎样更新判断”记录为训练信号。*
 
@@ -128,61 +129,120 @@ ROI 的另一个作用是防止问题退化为纯文本医学题。一个医学�
 
 ## 41.5 数据构建的概念流程
 
-MedImage-ToolVQA 的构建流程可以概括为六个阶段：区域样本整理、问题生成、质量校验、工具观察生成、轨迹合成和训练封装。每个阶段都不是孤立步骤，而是在维护同一条证据链。为了让读者看到概念阶段如何转化为可执行的数据处理，下面用伪代码表示五个核心处理动作。这里的 `merge`、`make_vqa`、`verify`、`makereasoning` 和 `make_sft` 只表示处理职责，重点在于输入、输出和质量门禁之间的关系。
+MedImage-ToolVQA 的构建流程可以概括为六个阶段：区域样本整理、问题生成、质量校验、工具观察生成、轨迹合成和训练封装。每个阶段都不是孤立步骤，而是在维护同一条证据链。为了让读者看到这些阶段如何进入 MindSpore 工程实现，下面不再使用抽象伪代码，而是把 `merge`、`make_vqa`、`verify`、`makereasoning` 和 `make_sft` 写成一组以 MindRecord、`mindspore.dataset` 和 `vllm-mindspore` 为核心的示例入口。其中，`vllm-mindspore` 的官方代码库采用 AtomGit 地址 <https://atomgit.com/mindspore/vllm-mindspore>。示例省略了具体路径、脱敏规则和异常处理细节，但保留了数据对象、质量门禁和训练封装之间的关系。
 
-```text
-输入：原始医学图像、区域候选、bbox、mask、目标描述、工具配置
-输出：可用于 SFT 或 RL 的多轮工具调用样本
+### 41.5.1 区域样本合并：写入 MindRecord
 
-merge:
-    读取来自不同来源的区域级结果
-    按图像标识和区域标识对齐记录
-    合并 bbox、mask、目标描述和来源信息
-    去除重复区域、空区域和无法追踪来源的记录
-    得到 region_pool
+`merge` 的重点是把来自不同解析工具或中间结果的区域证据统一成 MindSpore 可读取的数据资产。这里不展开完整工程代码，只保留核心数据契约：按 `image_id` 和 `region_id` 去重，保留 bbox、mask、目标描述和来源信息，并写入 MindRecord。
 
-make_vqa:
-    对 region_pool 中的每个有效区域:
-        根据原图、区域证据和目标描述生成问题
-        构造候选答案与唯一正确选项
-        隐去 bbox、mask、坐标等标注痕迹
-        保留问题与区域证据的对应关系
-    得到 vqa_candidates
+```python
+from mindspore.mindrecord import FileWriter
 
-verify:
-    对 vqa_candidates 中的每个样本:
-        检查题干、选项、答案和图像引用是否完整
-        判断问题是否必须依赖图像和目标区域
-        检查 bbox、mask、目标描述与答案是否一致
-        标记为通过、需要修改、降级或废弃
-    得到 verified_samples
+schema = {
+    "image_id": {"type": "string"},
+    "region_id": {"type": "string"},
+    "bbox": {"type": "int32", "shape": [-1]},
+    "mask_path": {"type": "string"},
+    "target_desc": {"type": "string"},
+    "source": {"type": "string"},
+}
 
-makereasoning:
-    对 verified_samples 中的通过样本:
-        如果问题需要局部取证:
-            选择允许的视觉工具
-            写入工具名和参数
-            生成工具观察图像引用
-            记录观察后的推理更新
-        否则:
-            保留直接视觉推理路径
-    得到 tool_trajectories
-
-make_sft:
-    对 tool_trajectories 中的每条轨迹:
-        将原始问题写入首轮 user 消息
-        将工具调用写入 assistant 消息
-        将工具观察写入后续 user 消息
-        将最终答案写入 assistant 消息
-        保留质量标签和版本信息
-    得到训练记录
+writer = FileWriter("region_pool.mindrecord", shard_num=4, overwrite=True)
+writer.add_schema(schema, "region evidence schema")
+writer.write_raw_data(deduplicate_regions(raw_regions, keys=["image_id", "region_id"]))
+writer.commit()
 ```
 
-![图41-2：MedImage-ToolVQA 数据构建概念流程](../../images/part12/ch41_02_medimage_tool_vqa_pipeline.png)
+### 41.5.2 LLM 服务：使用 vllm-mindspore
+
+`make_vqa` 和 `makereasoning` 需要调用本地部署的大模型。MindSpore 体系下可以通过 `vllm-mindspore` 提供 OpenAI 兼容服务；其官方代码库采用 AtomGit 地址 <https://atomgit.com/mindspore/vllm-mindspore>。
+
+```bash
+vllm-mindspore serve Qwen/Qwen3-vl-8B \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="EMPTY")
+```
+
+### 41.5.3 问题生成：从 MindDataset 读取区域证据
+
+`make_vqa` 从 `MindDataset` 读取区域证据，生成问题、候选选项和标准答案。构造 prompt 时需要隐藏 bbox、mask 路径和区域编号，避免把标注机制泄漏到题干中。
+
+```python
+import mindspore.dataset as ds
+
+dataset = ds.MindDataset("region_pool.mindrecord", shuffle=False)
+
+for row in dataset.create_dict_iterator(output_numpy=True):
+    prompt = build_vqa_prompt(row, hide_fields=["bbox", "mask_path", "region_id"])
+    reply = client.chat.completions.create(
+        model="Qwen/Qwen3-vl-8B",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    write_jsonl("vqa_candidates.jsonl", parse_vqa(reply.choices[0].message.content, row))
+```
+
+### 41.5.4 质量校验：形成自动门禁结果
+
+`verify` 不直接改写样本答案，而是给样本附加质量门禁结果。只有字段完整、图像依赖明确、区域一致且工具 JSON 合法的样本，才进入后续轨迹合成。
+
+```python
+gates = {
+    "complete": has_required_fields(sample),
+    "image_dependent": requires_visual_evidence(sample),
+    "region_consistent": align_question_answer_roi(sample),
+    "tool_json_valid": validate_tool_schema(sample),
+}
+
+sample["review_status"] = "pass" if all(gates.values()) else "revise"
+sample["quality_gates"] = gates
+```
+
+### 41.5.5 轨迹合成：把工具观察写回对话
+
+`makereasoning` 的核心不是生成更长的解释，而是把工具调用和工具返回图像变成下一轮上下文。若样本不需要局部证据，则保留直接视觉推理路径。
+
+```python
+observation = run_visual_tool(sample) if needs_local_evidence(sample) else None
+prompt = build_reasoning_prompt(sample, observation)
+reply = client.chat.completions.create(
+    model="Qwen/Qwen3-vl-8B",
+    messages=[{"role": "user", "content": prompt}],
+    temperature=0.1,
+)
+
+sample["trajectory"] = build_tool_trajectory(sample, observation, reply)
+```
+
+### 41.5.6 SFT 封装：训练记录继续写入 MindRecord
+
+`make_sft` 将多轮消息、图像引用、答案和质量标签写入训练用 MindRecord。SFT 训练侧再通过 `mindspore.dataset.MindDataset` 加载，并按 batch 进入模型微调流程。
+
+```python
+schema = {
+    "messages": {"type": "string"},
+    "images": {"type": "string"},
+    "answer": {"type": "string"},
+    "quality": {"type": "string"},
+}
+
+writer = FileWriter("tool_sft.mindrecord", shard_num=8, overwrite=True)
+writer.add_schema(schema, "tool-use SFT schema")
+writer.write_raw_data(pack_sft_records(tool_trajectories))
+writer.commit()
+
+train_ds = ds.MindDataset("tool_sft.mindrecord").shuffle(4096).batch(8)
+```
+
+![图41-2：MedImage-ToolVQA 数据构建概念流程](../../images/part12/ch41_02_medimage_tool_vqa_pipeline.svg)
 
 *图41-2：MedImage-ToolVQA 数据构建概念流程。流程的重点不是脚本顺序，而是证据链和行为链如何在各阶段被保留下来。*
-
-在实现组织上，MedImage-ToolVQA 可以保留面向不同深度学习框架的独立实现入口。 [MedImage-ToolVQA-Mindspore](https://github.com/blackkiring/MedImage-ToolVQA-Mindspore) 作为我们项目实现的仓库目录；该仓库放置了 MindSpore 版本的数据处理、训练封装、推理评测和说明文件。
 
 第一阶段是区域样本整理。来自医学图像解析工具的区域级结果需要被合并、去重和规范化。对于同一张医学图像，可能存在多个候选区域；同一个区域也可能在不同中间结果中重复出现。数据工程需要按区域标识进行去重，而非简单按图像去重，否则会误删同图中的多个病灶或结构。
 
@@ -222,7 +282,7 @@ MedImage-ToolVQA 中涉及三类视觉工具：`Zoom-in`、`BiomedParse` 和 `SA
 
 工具调用轨迹的核心是多轮结构。它不是把工具调用写在同一段文本中，而是将工具动作和工具观察分开，让模型在训练时经历一个“行动—观察—继续判断”的过程 (Yao et al. 2023)。
 
-![图41-3：工具调用多轮轨迹结构](../../images/part12/ch41_03_tool_trajectory_structure.png)
+![图41-3：工具调用多轮轨迹结构](../../images/part12/ch41_03_tool_trajectory_structure.svg)
 
 *图41-3：工具调用多轮轨迹结构。工具观察以新的图像输入形式返回，模型必须基于观察图继续推理，而非仅生成一个形式正确的调用。*
 
@@ -303,7 +363,7 @@ Assistant:
 
 在医学图像场景中，SFT 多轮记录还应显式保存一个影像诊断相关 schema。这里的“诊断”不是要求模型给出临床结论，而是把训练题目中的医学影像任务、候选标签、证据区域和安全边界结构化。图41-5给出了一组来自 VQA-RAD 测试集的胸片样例：同一条记录不仅保存原始图像，还保存 bbox 坐标、框选可视化图和由工具返回的局部观察图。
 
-![图41-5：SFT schema 中的真实图像与 bbox 证据](../../images/part12/ch41_05_sft_schema_real_bbox_example.png)
+![图41-5：SFT schema 中的真实图像与 bbox 证据](../../images/part12/ch41_05_sft_schema_real_bbox_example.svg)
 
 *图41-5：SFT schema 中的真实图像与 bbox 证据。bbox 是训练记录中的结构化字段，同时也应能被还原为可复查的可视化证据。*
 
@@ -440,7 +500,7 @@ Assistant:
 
 医学图像工具调用数据的质量控制应当分层进行，而非等到最终数据封装后再一次性检查。更合理的方式，是在问题生成、区域校验、工具观察生成、轨迹合成和训练封装各阶段分别设置门禁。
 
-![图41-4：质量控制与人工复核门禁](../../images/part12/ch41_04_quality_review_gate.png)
+![图41-4：质量控制与人工复核门禁](../../images/part12/ch41_04_quality_review_gate.svg)
 
 *图41-4：质量控制与人工复核门禁。医学图像工具调用数据需要同时检查答案、证据和行为，自动校验与人工复核应形成互补。*
 
